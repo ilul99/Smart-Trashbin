@@ -1,0 +1,120 @@
+#define BLYNK_TEMPLATE_ID "TMPL6EWKq-xdS"
+#define BLYNK_TEMPLATE_NAME "Tempat Sampah Otomatis"
+#define BLYNK_AUTH_TOKEN "kApJC6YaDHV7JpmhaJoKoF6K7TeBFtm3"
+
+#include <WiFi.h>
+#include <ESP32Servo.h>
+#include <BlynkSimpleEsp32.h>
+
+// WiFi credentials
+const char* ssid = "AQUAMAN";
+const char* password = "beyemmaraye";
+
+// Pin setup
+const int trigPin = 5;
+const int echoPin = 18;
+const int servoPin = 15;
+
+Servo myServo;
+
+// State
+bool gateOpen = false;
+bool autoMode = true;
+float distance;
+unsigned long lastDistanceCheck = 0;
+const unsigned long distanceInterval = 200;
+
+// === Sensor Jarak ===
+float readDistance() {
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+  long duration = pulseIn(echoPin, HIGH, 30000);
+  return duration * 0.034 / 2;
+}
+
+// === Servo Movement Smooth ===
+void moveServoSmooth(int fromAngle, int toAngle) {
+  int step = (toAngle > fromAngle) ? 1 : -1;
+  for (int pos = fromAngle; pos != toAngle; pos += step) {
+    myServo.write(pos);
+    delay(10);  // Kecepatan gerak
+  }
+  myServo.write(toAngle);
+}
+
+// === Kontrol Servo ===
+void openGate() {
+  moveServoSmooth(gateOpen ? 45 : 0, 45);
+  gateOpen = true;
+  Serial.println("Pintu dibuka");
+}
+
+void closeGate() {
+  moveServoSmooth(gateOpen ? 45 : 0, 0);
+  gateOpen = false;
+  Serial.println("Pintu ditutup");
+}
+
+// === Blynk: Tombol Manual (toggle buka/tutup) ===
+BLYNK_WRITE(V0) {
+  if (!autoMode) {
+    if (!gateOpen) openGate();
+    else closeGate();
+  } else {
+    Serial.println("Manual diblokir: mode otomatis aktif");
+  }
+}
+
+// === Blynk: Switch Mode Otomatis ===
+BLYNK_WRITE(V1) {
+  int val = param.asInt();
+  autoMode = (val == 1);
+  Serial.println(autoMode ? "Mode Otomatis Aktif" : "Mode Manual Aktif");
+}
+
+// === Setup ===
+void setup() {
+  Serial.begin(115200);
+  pinMode(trigPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+  myServo.attach(servoPin);
+  closeGate();
+
+  WiFi.begin(ssid, password);
+  Serial.print("Menghubungkan ke WiFi");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(300);
+    Serial.print(".");
+  }
+  Serial.println("\nWiFi terhubung:");
+  Serial.println(WiFi.localIP());
+
+  Blynk.begin(BLYNK_AUTH_TOKEN, ssid, password);
+}
+
+// === Loop ===
+void loop() {
+  Blynk.run();
+
+  unsigned long currentMillis = millis();
+  if (currentMillis - lastDistanceCheck >= distanceInterval) {
+    lastDistanceCheck = currentMillis;
+    distance = readDistance();
+
+    if (autoMode) {
+      if (distance < 10 && !gateOpen) {
+        openGate();
+      } else if (distance >= 60 && gateOpen) {
+        closeGate();
+      }
+    }
+
+    Serial.print("Jarak: ");
+    Serial.print(distance, 1);
+    Serial.print(" cm | Mode: ");
+    Serial.println(autoMode ? "Otomatis" : "Manual");
+  }
+}
